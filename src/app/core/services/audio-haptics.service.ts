@@ -53,17 +53,23 @@ export class AudioHapticsService {
     if (typeof document !== 'undefined') {
       document.addEventListener('pointerdown', () => this.unlock(), { capture: true });
       document.addEventListener('visibilitychange', () => {
-        if (!document.hidden && this.audioCtx?.state === 'suspended') {
-          void this.audioCtx.resume();
+        if (document.hidden) return;
+        if (!this.wantsGameAudio()) {
+          this.releaseAudioSession();
+          return;
         }
+        if (this.audioCtx?.state === 'suspended') void this.audioCtx.resume();
       });
     }
   }
 
   /** Creates and resumes the audio context inside the user's tap. Mobile browsers stay silent otherwise. */
   unlock(): void {
-    const nav = navigator as Navigator & { audioSession?: { type: string } };
-    if (nav.audioSession) nav.audioSession.type = 'playback';
+    if (!this.wantsGameAudio()) {
+      this.releaseAudioSession();
+      return;
+    }
+    this.setAudioSession('playback');
 
     const ctx = this.initAudio();
     if (!ctx) return;
@@ -88,8 +94,12 @@ export class AudioHapticsService {
     const next = !this.soundEnabled();
     this.soundEnabled.set(next);
     localStorage.setItem('queens_sound', String(next));
-    this.unlock();
-    if (next) this.playMarkX();
+    if (next) {
+      this.unlock();
+      this.playMarkX();
+    } else if (!this.musicEnabled()) {
+      this.releaseAudioSession();
+    }
     return next;
   }
 
@@ -102,6 +112,7 @@ export class AudioHapticsService {
       this.unlock();
     } else {
       this.stopAmbientMusic();
+      if (!this.soundEnabled()) this.releaseAudioSession();
     }
     return next;
   }
@@ -111,9 +122,23 @@ export class AudioHapticsService {
     const next = !this.hapticsEnabled();
     this.hapticsEnabled.set(next);
     localStorage.setItem('queens_haptics', String(next));
-    this.unlock();
     if (next) this.vibrate(25);
     return next;
+  }
+
+  private wantsGameAudio(): boolean {
+    return this.soundEnabled() || this.musicEnabled();
+  }
+
+  /** playback interrupts other apps. ambient lets YouTube or Spotify keep playing. */
+  private setAudioSession(type: 'playback' | 'ambient'): void {
+    const nav = navigator as Navigator & { audioSession?: { type: string } };
+    if (nav.audioSession) nav.audioSession.type = type;
+  }
+
+  private releaseAudioSession(): void {
+    this.setAudioSession('ambient');
+    if (this.audioCtx?.state === 'running') void this.audioCtx.suspend();
   }
 
   private initAudio(): AudioContext | null {
