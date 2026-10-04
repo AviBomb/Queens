@@ -343,6 +343,27 @@ describe('GameEngineService', () => {
     expect(engine.activeHint()).toBeNull();
   });
 
+  it('keeps a place-a-queen hint until that cell is a queen', () => {
+    engine.activeHint.set({
+      type: 'forced_queen',
+      title: 'A nudge',
+      message: 'Place the queen here.',
+      suggestedMark: 'queen',
+      coords: [{ row: 0, col: 0 }]
+    });
+
+    engine.cycleCell(0, 0);
+    expect(engine.board()[0][0].mark).toBe('x');
+    expect(engine.activeHint()?.suggestedMark).toBe('queen');
+
+    engine.cycleCell(1, 1);
+    expect(engine.activeHint()?.suggestedMark).toBe('queen');
+
+    engine.cycleCell(0, 0);
+    expect(engine.board()[0][0].mark).toBe('queen');
+    expect(engine.activeHint()).toBeNull();
+  });
+
   it('pauses the timer while away and resumes on return', () => {
     engine.setTimerPaused(true);
     vi.useFakeTimers();

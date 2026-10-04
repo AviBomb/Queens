@@ -417,12 +417,25 @@ export class GameEngineService {
     this.saveProgress();
   }
 
-  /** "Cross these cells" hints stay up until every hinted cell is an X; other hints clear on the next move. */
+  /**
+   * Cross-these-cells hints stay until every hinted cell is an X.
+   * Place-a-queen hints stay until that cell is a queen, so marking it with X does not hide the hint.
+   * Other hints clear on the next move.
+   */
   private reconcileHint(): void {
     const hint = this.activeHint();
     if (!hint) return;
     const b = this.board();
-    const pending = hint.type === 'elimination' && hint.coords.some((c) => b[c.row][c.col].mark !== 'x');
+    if (hint.suggestedMark === 'queen') {
+      const placed = hint.coords.every((c) => b[c.row][c.col].mark === 'queen');
+      if (placed) this.activeHint.set(null);
+      return;
+    }
+    if (hint.type !== 'elimination') {
+      this.activeHint.set(null);
+      return;
+    }
+    const pending = hint.coords.some((c) => b[c.row][c.col].mark !== 'x');
     if (!pending) this.activeHint.set(null);
   }
 
