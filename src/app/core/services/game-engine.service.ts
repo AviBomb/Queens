@@ -400,8 +400,15 @@ export class GameEngineService {
       autoXCells = removedAutoX;
     }
 
-    // Record history
-    this.moveHistory.update((h) => [...h, { row, col, prevMark, newMark: mark, autoXCells }]);
+    // A queen placed on the X from the previous tap is one move back to empty, not two.
+    const entry: Move = { row, col, prevMark, newMark: mark, autoXCells };
+    this.moveHistory.update((h) => {
+      const last = h.at(-1);
+      if (mark === 'queen' && last && last.row === row && last.col === col && last.newMark === 'x') {
+        return [...h.slice(0, -1), { ...entry, prevMark: last.prevMark }];
+      }
+      return [...h, entry];
+    });
     this.redoStack.set([]);
 
     this.board.set(newBoard);
@@ -423,8 +430,15 @@ export class GameEngineService {
     const history = this.moveHistory();
     if (history.length === 0 || this.isSolved() || this.isReviewMode()) return;
 
-    const lastMove = history[history.length - 1];
-    this.moveHistory.set(history.slice(0, -1));
+    let lastMove = history[history.length - 1];
+    let remaining = history.slice(0, -1);
+    if (lastMove.newMark === 'queen' && lastMove.prevMark === 'x') {
+      const queenRow = lastMove.row;
+      const queenCol = lastMove.col;
+      lastMove = { ...lastMove, prevMark: 'empty' };
+      remaining = remaining.filter((m) => !(m.row === queenRow && m.col === queenCol && m.newMark === 'x'));
+    }
+    this.moveHistory.set(remaining);
     this.redoStack.update((r) => [...r, lastMove]);
 
     let updatedBoard = this.board().map((r, rIdx) =>
@@ -760,8 +774,8 @@ export class GameEngineService {
     this.activeHint.set(hint);
     this.audio.playMarkX();
 
-    // Start 15-second cooldown timer
-    this.hintCooldown.set(15);
+    // Start 10-second cooldown timer
+    this.hintCooldown.set(10);
     if (this.cooldownInterval) clearInterval(this.cooldownInterval);
     this.cooldownInterval = setInterval(() => {
       this.hintCooldown.update((sec) => {

@@ -39,7 +39,7 @@ import { IconComponent } from '../../shared/icon.component';
           type="button"
           class="tool"
           [disabled]="game.isSolved()"
-          (click)="game.restartCurrentGame()"
+          (click)="askRestart()"
           [title]="game.isSolved() ? 'Restart is unavailable on a finished puzzle' : 'Restart puzzle (R)'"
         >
           <app-icon name="restart" />
@@ -167,6 +167,25 @@ import { IconComponent } from '../../shared/icon.component';
                 }
               </button>
             }
+          </div>
+        </div>
+      </div>
+    }
+
+    @if (confirmRestart()) {
+      <div class="sheet-backdrop" (click)="confirmRestart.set(false)">
+        <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="restart-title" (click)="$event.stopPropagation()">
+          <div class="sheet-grabber" aria-hidden="true"></div>
+          <div class="sheet-head">
+            <h2 id="restart-title" class="sheet-title">Restart puzzle?</h2>
+            <button type="button" class="sheet-close" (click)="confirmRestart.set(false)" aria-label="Cancel restart">
+              <app-icon name="close" />
+            </button>
+          </div>
+          <p class="restart-copy">Restart this puzzle? Your marks and the timer will be cleared.</p>
+          <div class="restart-actions">
+            <button type="button" class="btn btn-tonal" (click)="confirmRestart.set(false)">Cancel</button>
+            <button type="button" class="btn btn-primary" (click)="confirmRestartNow()">Restart</button>
           </div>
         </div>
       </div>
@@ -332,6 +351,9 @@ import { IconComponent } from '../../shared/icon.component';
       }
       .seed-toggle-label { display: inline; }
     }
+
+    .restart-copy { font-size: 15px; line-height: 1.4; color: var(--text-2); }
+    .restart-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   `]
 })
 export class ToolbarComponent {
@@ -339,6 +361,7 @@ export class ToolbarComponent {
 
   readonly showSeedInput = signal<boolean>(false);
   readonly showSizes = signal<boolean>(false);
+  readonly confirmRestart = signal(false);
   customSeed: number | null = null;
 
   readonly sizeOptions: { value: BoardSizeOption; badge: string; name: string; desc: string }[] = [
@@ -393,9 +416,30 @@ export class ToolbarComponent {
     }
   }
 
+  askRestart(): void {
+    if (this.game.isSolved() || this.game.isReviewMode()) return;
+    this.confirmRestart.set(true);
+  }
+
+  confirmRestartNow(): void {
+    this.confirmRestart.set(false);
+    this.game.restartCurrentGame();
+  }
+
   @HostListener('window:keydown', ['$event'])
   handleKeyboard(event: KeyboardEvent): void {
     if (event.target instanceof HTMLInputElement) return;
+
+    if (this.confirmRestart()) {
+      if (event.key === 'Escape') {
+        this.confirmRestart.set(false);
+        event.preventDefault();
+      } else if (event.key === 'Enter') {
+        this.confirmRestartNow();
+        event.preventDefault();
+      }
+      return;
+    }
 
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
       if (event.shiftKey) {
@@ -409,8 +453,8 @@ export class ToolbarComponent {
       event.preventDefault();
     } else if (event.key.toLowerCase() === 'h') {
       this.game.requestHint();
-    } else if (event.key.toLowerCase() === 'r') {
-      this.game.restartCurrentGame();
+    } else if (event.key.toLowerCase() === 'r' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      this.askRestart();
     }
   }
 }

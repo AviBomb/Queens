@@ -150,13 +150,20 @@ import { IconComponent } from '../../shared/icon.component';
               <span class="switch" [class.on]="audio.soundEnabled()"><span class="thumb"></span></span>
             </button>
 
-            <button type="button" class="row" role="switch" [attr.aria-checked]="audio.hapticsEnabled()" (click)="audio.toggleHaptics()">
-              <span class="row-icon" [class.is-on]="audio.hapticsEnabled()"><app-icon name="vibrate" /></span>
+            <button
+              type="button"
+              class="row"
+              role="switch"
+              [attr.aria-checked]="audio.hapticsSupported && audio.hapticsEnabled()"
+              [disabled]="!audio.hapticsSupported"
+              (click)="audio.toggleHaptics()"
+            >
+              <span class="row-icon" [class.is-on]="audio.hapticsSupported && audio.hapticsEnabled()"><app-icon name="vibrate" /></span>
               <span class="row-text">
                 <span class="row-name">Haptics</span>
-                <span class="row-desc">Vibrate on queens and marks</span>
+                <span class="row-desc">{{ audio.hapticsSupported ? 'Vibrate on queens and marks' : 'Not supported on this phone' }}</span>
               </span>
-              <span class="switch" [class.on]="audio.hapticsEnabled()"><span class="thumb"></span></span>
+              <span class="switch" [class.on]="audio.hapticsSupported && audio.hapticsEnabled()"><span class="thumb"></span></span>
             </button>
 
             <button

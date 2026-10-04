@@ -7,6 +7,7 @@ export class AudioHapticsService {
   readonly soundEnabled = signal<boolean>(true);
   readonly musicEnabled = signal<boolean>(false);
   readonly hapticsEnabled = signal<boolean>(true);
+  readonly hapticsSupported = typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function';
 
   private audioCtx: AudioContext | null = null;
   private musicGain: GainNode | null = null;
@@ -48,12 +49,46 @@ export class AudioHapticsService {
         this.hapticsEnabled.set(savedHaptics === 'true');
       }
     }
+
+    if (typeof document !== 'undefined') {
+      document.addEventListener('pointerdown', () => this.unlock(), { capture: true });
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden && this.audioCtx?.state === 'suspended') {
+          void this.audioCtx.resume();
+        }
+      });
+    }
+  }
+
+  /** Creates and resumes the audio context inside the user's tap. Mobile browsers stay silent otherwise. */
+  unlock(): void {
+    const nav = navigator as Navigator & { audioSession?: { type: string } };
+    if (nav.audioSession) nav.audioSession.type = 'playback';
+
+    const ctx = this.initAudio();
+    if (!ctx) return;
+
+    if (ctx.state !== 'running') {
+      const buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(ctx.destination);
+      try {
+        source.start(0);
+      } catch {
+        // The context can reject a start while it is still suspended; resume() below finishes the unlock.
+      }
+      void ctx.resume();
+    }
+
+    if (this.musicEnabled() && !this.musicIntervalId) this.startAmbientMusic();
   }
 
   toggleSound(): boolean {
     const next = !this.soundEnabled();
     this.soundEnabled.set(next);
     localStorage.setItem('queens_sound', String(next));
+    this.unlock();
     if (next) this.playMarkX();
     return next;
   }
@@ -64,7 +99,7 @@ export class AudioHapticsService {
     localStorage.setItem('queens_music', String(next));
 
     if (next) {
-      this.startAmbientMusic();
+      this.unlock();
     } else {
       this.stopAmbientMusic();
     }
@@ -72,9 +107,12 @@ export class AudioHapticsService {
   }
 
   toggleHaptics(): boolean {
+    if (!this.hapticsSupported) return this.hapticsEnabled();
     const next = !this.hapticsEnabled();
     this.hapticsEnabled.set(next);
     localStorage.setItem('queens_haptics', String(next));
+    this.unlock();
+    if (next) this.vibrate(25);
     return next;
   }
 
@@ -98,18 +136,26 @@ export class AudioHapticsService {
       }
 
       if (this.audioCtx.state === 'suspended') {
-        this.audioCtx.resume();
-      }
-
-      // If music was enabled by user, start scheduling
-      if (this.musicEnabled() && !this.musicIntervalId) {
-        this.startAmbientMusic();
+        void this.audioCtx.resume();
       }
 
       return this.audioCtx;
     } catch {
       return null;
     }
+  }
+
+  /** Runs a sound effect once the context is actually running, so notes are not scheduled on a frozen clock. */
+  private withSfx(play: (ctx: AudioContext) => void): void {
+    if (!this.soundEnabled()) return;
+    const ctx = this.initAudio();
+    if (!ctx || !this.sfxGain) return;
+    const run = () => {
+      if (ctx.state !== 'running') return;
+      play(ctx);
+    };
+    if (ctx.state === 'running') run();
+    else void ctx.resume().then(run);
   }
 
   // ==========================================
@@ -150,11 +196,16 @@ export class AudioHapticsService {
     if (!this.audioCtx || !this.musicEnabled() || !this.musicGain) return;
 
     const ctx = this.audioCtx;
+    if (ctx.state !== 'running') {
+      void ctx.resume();
+      return;
+    }
     const lookahead = 1.2; // seconds ahead
 
     while (this.nextChordTime < ctx.currentTime + lookahead) {
       const chord = this.chords[this.currentChordIndex];
       const chordDuration = 4.0; // 4 seconds per chord
+      const start = Math.max(this.nextChordTime, ctx.currentTime);
 
       // Play soft ambient pad voices
       chord.forEach((freq, i) => {
@@ -164,15 +215,14 @@ export class AudioHapticsService {
 
         // Warm filtered triangle/sine
         osc.type = i === 0 ? 'sine' : 'triangle';
-        osc.frequency.setValueAtTime(freq, this.nextChordTime);
+        osc.frequency.setValueAtTime(freq, start);
 
         // Low-pass filter for smooth mellow tone
         filter.type = 'lowpass';
-        filter.frequency.setValueAtTime(i === 0 ? 300 : 700, this.nextChordTime);
-        filter.Q.setValueAtTime(1.0, this.nextChordTime);
+        filter.frequency.setValueAtTime(i === 0 ? 300 : 700, start);
+        filter.Q.setValueAtTime(1.0, start);
 
         // Slow soft envelope
-        const start = this.nextChordTime;
         const peakGain = i === 0 ? 0.35 : 0.18;
         noteGain.gain.setValueAtTime(0.0001, start);
         noteGain.gain.exponentialRampToValueAtTime(peakGain, start + 0.9);
@@ -188,7 +238,7 @@ export class AudioHapticsService {
       });
 
       // Play subtle chime sparkle in the middle of each chord
-      const sparkleTime = this.nextChordTime + 1.8;
+      const sparkleTime = start + 1.8;
       const sparkleFreq = this.shimmerNotes[(this.currentChordIndex * 2) % this.shimmerNotes.length];
       const sparkleOsc = ctx.createOscillator();
       const sparkleGain = ctx.createGain();
@@ -204,7 +254,7 @@ export class AudioHapticsService {
       sparkleOsc.start(sparkleTime);
       sparkleOsc.stop(sparkleTime + 1.2);
 
-      this.nextChordTime += chordDuration;
+      this.nextChordTime = start + chordDuration;
       this.currentChordIndex = (this.currentChordIndex + 1) % this.chords.length;
     }
   }
@@ -217,11 +267,8 @@ export class AudioHapticsService {
    * Queen placement sound: resonant crystal chime with gentle dual overtones
    */
   playPlaceQueen(): void {
-    if (!this.soundEnabled()) return;
-    const ctx = this.initAudio();
     this.vibrate(25);
-    if (!ctx || !this.sfxGain) return;
-
+    this.withSfx((ctx) => {
     const t = ctx.currentTime;
     const freqs = [523.25, 1046.5, 1567.98]; // C5 fundamental + C6 + G6 harmonic sparkle
     const weights = [0.25, 0.12, 0.06];
@@ -243,17 +290,15 @@ export class AudioHapticsService {
       osc.start(t);
       osc.stop(t + 0.45);
     });
+    });
   }
 
   /**
    * Mark X sound: tactile, organic wooden tap (crisp, pleasant, zero fatigue)
    */
   playMarkX(): void {
-    if (!this.soundEnabled()) return;
-    const ctx = this.initAudio();
     this.vibrate(10);
-    if (!ctx || !this.sfxGain) return;
-
+    this.withSfx((ctx) => {
     const t = ctx.currentTime;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
@@ -273,21 +318,19 @@ export class AudioHapticsService {
 
     osc.connect(filter);
     filter.connect(gain);
-    gain.connect(this.sfxGain);
+    gain.connect(this.sfxGain!);
 
     osc.start(t);
     osc.stop(t + 0.05);
+    });
   }
 
   /**
    * Erase / clear cell sound: soft, subtle air brush
    */
   playErase(): void {
-    if (!this.soundEnabled()) return;
-    const ctx = this.initAudio();
     this.vibrate(8);
-    if (!ctx || !this.sfxGain) return;
-
+    this.withSfx((ctx) => {
     const t = ctx.currentTime;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
@@ -300,21 +343,19 @@ export class AudioHapticsService {
     gain.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
 
     osc.connect(gain);
-    gain.connect(this.sfxGain);
+    gain.connect(this.sfxGain!);
 
     osc.start(t);
     osc.stop(t + 0.06);
+    });
   }
 
   /**
    * Conflict alert: soft melodic warning marimba (informative, non-abrasive)
    */
   playConflict(): void {
-    if (!this.soundEnabled()) return;
-    const ctx = this.initAudio();
     this.vibrate([20, 30, 20]);
-    if (!ctx || !this.sfxGain) return;
-
+    this.withSfx((ctx) => {
     const t = ctx.currentTime;
     // Gentle minor second chord
     [311.13, 329.63].forEach((freq) => {
@@ -333,17 +374,15 @@ export class AudioHapticsService {
       osc.start(t);
       osc.stop(t + 0.22);
     });
+    });
   }
 
   /**
    * Victory fanfare: shimmering 5-note arpeggiated triumph
    */
   playVictory(): void {
-    if (!this.soundEnabled()) return;
-    const ctx = this.initAudio();
     this.vibrate([40, 50, 40, 50, 160]);
-    if (!ctx || !this.sfxGain) return;
-
+    this.withSfx((ctx) => {
     const notes = [523.25, 659.25, 783.99, 1046.5, 1318.51]; // C5, E5, G5, C6, E6
     notes.forEach((freq, idx) => {
       const osc = ctx.createOscillator();
@@ -363,17 +402,15 @@ export class AudioHapticsService {
       osc.start(startTime);
       osc.stop(startTime + 0.65);
     });
+    });
   }
 
   /**
    * Undo sound: subtle reverse acoustic pop
    */
   playUndo(): void {
-    if (!this.soundEnabled()) return;
-    const ctx = this.initAudio();
     this.vibrate(10);
-    if (!ctx || !this.sfxGain) return;
-
+    this.withSfx((ctx) => {
     const t = ctx.currentTime;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
@@ -386,10 +423,11 @@ export class AudioHapticsService {
     gain.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
 
     osc.connect(gain);
-    gain.connect(this.sfxGain);
+    gain.connect(this.sfxGain!);
 
     osc.start(t);
     osc.stop(t + 0.06);
+    });
   }
 
   private vibrate(pattern: number | number[]): void {

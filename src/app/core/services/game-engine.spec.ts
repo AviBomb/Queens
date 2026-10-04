@@ -44,10 +44,40 @@ describe('GameEngineService', () => {
     expect(engine.canUndo()).toBe(true);
 
     engine.undo();
-    expect(engine.board()[1][1].mark).toBe('x');
+    expect(engine.board()[1][1].mark).toBe('empty');
 
     engine.redo();
     expect(engine.board()[1][1].mark).toBe('queen');
+  });
+
+  it('undoing a tapped queen clears the cell and its auto-X marks in one step', () => {
+    if (!engine.autoX()) engine.toggleAutoX();
+
+    engine.cycleCell(2, 2);
+    engine.cycleCell(2, 2);
+    expect(engine.board()[2][2].mark).toBe('queen');
+    expect(engine.board()[2][3].mark).toBe('x');
+
+    engine.undo();
+    expect(engine.board()[2][2].mark).toBe('empty');
+    expect(engine.board()[2][3].mark).toBe('empty');
+
+    engine.redo();
+    expect(engine.board()[2][2].mark).toBe('queen');
+    expect(engine.board()[2][3].mark).toBe('x');
+  });
+
+  it('undoing a queen placed over an earlier X clears that cell to empty', () => {
+    engine.setCellMark(0, 0, 'x');
+    engine.setCellMark(1, 1, 'x');
+    engine.setCellMark(0, 0, 'queen');
+
+    engine.undo();
+    expect(engine.board()[0][0].mark).toBe('empty');
+
+    engine.undo();
+    expect(engine.board()[1][1].mark).toBe('empty');
+    expect(engine.canUndo()).toBe(false);
   });
 
   it('should automatically remove auto-X cells when queen is removed', () => {
