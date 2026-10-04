@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { TestBed } from '@angular/core/testing';
 import { GameEngineService } from './game-engine.service';
 import { PuzzleGeneratorService } from './puzzle-generator.service';
@@ -293,5 +293,42 @@ describe('GameEngineService', () => {
     engine.startNewGame();
     expect(engine.isReviewMode()).toBe(false);
     expect(engine.queenCount()).toBe(0);
+  });
+
+  it('keeps a cross-these-cells hint until every hinted cell is crossed', () => {
+    if (engine.autoX()) engine.toggleAutoX();
+    const queen = engine.puzzle()!.solution[0];
+    engine.setCellMark(queen.row, queen.col, 'queen');
+
+    engine.requestHint();
+    const hint = engine.activeHint();
+    expect(hint?.type).toBe('elimination');
+    expect(hint!.coords.length).toBeGreaterThan(1);
+
+    const [first, ...rest] = hint!.coords;
+    engine.cycleCell(first.row, first.col);
+    expect(engine.activeHint()).toBe(hint);
+
+    for (const c of rest) engine.setCellMark(c.row, c.col, 'x');
+    expect(engine.activeHint()).toBeNull();
+  });
+
+  it('pauses the timer while away and resumes on return', () => {
+    engine.setTimerPaused(true);
+    vi.useFakeTimers();
+    try {
+      const before = engine.elapsedSeconds();
+      vi.advanceTimersByTime(5000);
+      expect(engine.isTimerRunning()).toBe(false);
+      expect(engine.elapsedSeconds()).toBe(before);
+
+      engine.setTimerPaused(false);
+      vi.advanceTimersByTime(3000);
+      expect(engine.isTimerRunning()).toBe(true);
+      expect(engine.elapsedSeconds()).toBe(before + 3);
+      engine.setTimerPaused(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

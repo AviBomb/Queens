@@ -288,7 +288,6 @@ export class GameEngineService {
    */
   cycleCell(row: number, col: number): void {
     if (this.isSolved() || this.isReviewMode()) return;
-    this.activeHint.set(null);
 
     const currentCell = this.board()[row][col];
     let nextMark: CellMark;
@@ -312,7 +311,6 @@ export class GameEngineService {
    */
   toggleQueenDirect(row: number, col: number): void {
     if (this.isSolved() || this.isReviewMode()) return;
-    this.activeHint.set(null);
 
     const currentCell = this.board()[row][col];
     const nextMark: CellMark = currentCell.mark === 'queen' ? 'empty' : 'queen';
@@ -408,7 +406,17 @@ export class GameEngineService {
 
     this.board.set(newBoard);
     this.updateConflictsAndCheckWin();
+    this.reconcileHint();
     this.saveProgress();
+  }
+
+  /** "Cross these cells" hints stay up until every hinted cell is an X; other hints clear on the next move. */
+  private reconcileHint(): void {
+    const hint = this.activeHint();
+    if (!hint) return;
+    const b = this.board();
+    const pending = hint.type === 'elimination' && hint.coords.some((c) => b[c.row][c.col].mark !== 'x');
+    if (!pending) this.activeHint.set(null);
   }
 
   undo(): void {
@@ -765,6 +773,17 @@ export class GameEngineService {
         return sec - 1;
       });
     }, 1000);
+  }
+
+  /** Pauses while the player is away; resumes only for a live, unsolved puzzle. */
+  setTimerPaused(paused: boolean): void {
+    if (paused) {
+      if (!this.timerInterval) return;
+      this.stopTimer();
+      this.saveProgress();
+    } else if (!this.timerInterval && this.puzzle() && !this.isSolved() && !this.isReviewMode()) {
+      this.startTimer();
+    }
   }
 
   private startTimer(): void {

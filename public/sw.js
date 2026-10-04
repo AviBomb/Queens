@@ -1,4 +1,4 @@
-const CACHE_NAME = 'queens-game-v1';
+const CACHE_NAME = 'queens-game-v2';
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();

@@ -1,4 +1,4 @@
-import { Component, effect, inject, OnInit, signal } from '@angular/core';
+import { Component, effect, HostListener, inject, OnInit, signal } from '@angular/core';
 import { GameEngineService } from './core/services/game-engine.service';
 import { StorageService } from './core/services/storage.service';
 import { HeaderComponent } from './features/header/header.component';
@@ -74,8 +74,16 @@ export class App implements OnInit {
 
       this.game.board.set(restoredBoard);
       this.game.elapsedSeconds.set(saved.elapsedSeconds);
-      this.game.isTimerRunning.set(true);
     } else {
       this.game.startNewGame(undefined, true);
-    }  }
+    }
+    this.syncTimerWithPresence();
+  }
+
+  @HostListener('document:visibilitychange')
+  @HostListener('window:blur')
+  @HostListener('window:focus')
+  syncTimerWithPresence(): void {
+    this.game.setTimerPaused(document.hidden || !document.hasFocus());
+  }
 }

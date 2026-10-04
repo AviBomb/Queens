@@ -34,10 +34,6 @@ import { IconComponent } from '../../shared/icon.component';
                   [attr.data-row]="rowIdx"
                   [attr.data-col]="colIdx"
                   [style.background-color]="getRegionColor(cell.regionId)"
-                  [class.border-top-thick]="isTopBorderThick(rowIdx, colIdx)"
-                  [class.border-bottom-thick]="isBottomBorderThick(rowIdx, colIdx)"
-                  [class.border-left-thick]="isLeftBorderThick(rowIdx, colIdx)"
-                  [class.border-right-thick]="isRightBorderThick(rowIdx, colIdx)"
                   [class.has-queen]="cell.mark === 'queen'"
                   [class.has-x]="cell.mark === 'x'"
                   [class.is-conflict]="cell.isConflict || cell.isConflictAdjacent"
@@ -103,6 +99,9 @@ import { IconComponent } from '../../shared/icon.component';
                 </div>
               }
             }
+            <svg class="region-lines" [attr.viewBox]="'0 0 ' + size() + ' ' + size()" preserveAspectRatio="none" aria-hidden="true">
+              <path [attr.d]="dividers()" />
+            </svg>
           </div>
         </div>
       </div>
@@ -189,14 +188,16 @@ import { IconComponent } from '../../shared/icon.component';
     .has-hint .board-shell { width: min(100cqi, 100cqb - 120px, 600px); }
 
     .queens-grid {
+      position: relative;
       width: 100%;
       height: 100%;
       display: grid;
       grid-template-columns: repeat(var(--n, 8), 1fr);
       grid-template-rows: repeat(var(--n, 8), 1fr);
-      border: 2.5px solid var(--board-divider);
+      border: 3px solid var(--board-divider);
       border-radius: 17px;
       overflow: hidden;
+      clip-path: inset(0 round 17px);
       background: var(--board-divider);
       touch-action: none;
       -webkit-touch-callout: none;
@@ -214,10 +215,23 @@ import { IconComponent } from '../../shared/icon.component';
       transition: filter 120ms var(--ease-out);
     }
 
-    .grid-cell.border-top-thick { border-top: 3px solid var(--board-divider); }
-    .grid-cell.border-bottom-thick { border-bottom: 3px solid var(--board-divider); }
-    .grid-cell.border-left-thick { border-left: 3px solid var(--board-divider); }
-    .grid-cell.border-right-thick { border-right: 3px solid var(--board-divider); }
+    .region-lines {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 4;
+      pointer-events: none;
+      overflow: visible;
+    }
+
+    .region-lines path {
+      fill: none;
+      stroke: var(--board-divider);
+      stroke-width: 3px;
+      stroke-linecap: square;
+      vector-effect: non-scaling-stroke;
+    }
 
     .grid-cell:focus-visible { outline: 3px solid var(--focus); outline-offset: -3px; z-index: 3; }
 
@@ -367,37 +381,28 @@ export class BoardComponent {
     return new Set((this.game.activeHint()?.focus ?? []).map((c) => c.row * n + c.col));
   });
 
+  /** Region boundaries as one path in cell units; square caps close the corners where segments meet. */
+  readonly dividers = computed(() => {
+    const b = this.game.board();
+    const n = b.length;
+    let d = '';
+    for (let r = 0; r < n; r++) {
+      for (let c = 0; c < n; c++) {
+        if (c < n - 1 && b[r][c].regionId !== b[r][c + 1].regionId) d += `M${c + 1} ${r}V${r + 1}`;
+        if (r < n - 1 && b[r][c].regionId !== b[r + 1][c].regionId) d += `M${c} ${r + 1}H${c + 1}`;
+      }
+    }
+    return d;
+  });
+
   getRegionColor(regionId: number): string {
     return `var(--region-${regionId})`;
-  }
-
-  isTopBorderThick(r: number, c: number): boolean {
-    const b = this.game.board();
-    if (r === 0) return false;
-    return b[r][c].regionId !== b[r - 1][c].regionId;
-  }
-
-  isBottomBorderThick(r: number, c: number): boolean {
-    const b = this.game.board();
-    if (r === b.length - 1) return false;
-    return b[r][c].regionId !== b[r + 1][c].regionId;
-  }
-
-  isLeftBorderThick(r: number, c: number): boolean {
-    const b = this.game.board();
-    if (c === 0) return false;
-    return b[r][c].regionId !== b[r][c - 1].regionId;
-  }
-
-  isRightBorderThick(r: number, c: number): boolean {
-    const b = this.game.board();
-    if (c === b.length - 1) return false;
-    return b[r][c].regionId !== b[r][c + 1].regionId;
   }
 
   isCellHinted(r: number, c: number): boolean {
     const hint = this.game.activeHint();
     if (!hint) return false;
+    if (hint.type === 'elimination' && this.game.board()[r][c].mark === 'x') return false;
     return hint.coords.some((coord) => coord.row === r && coord.col === c);
   }
 
