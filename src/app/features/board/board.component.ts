@@ -1,6 +1,7 @@
-import { Component, HostListener, computed, inject } from '@angular/core';
+import { Component, DestroyRef, HostListener, computed, inject, signal } from '@angular/core';
 import { GameEngineService } from '../../core/services/game-engine.service';
 import { CellMark } from '../../core/models/queens.model';
+import { formatCountdown, formatDuration, msUntilNextMidnight } from '../../core/logic/format';
 import { IconComponent } from '../../shared/icon.component';
 
 @Component({
@@ -118,7 +119,12 @@ import { IconComponent } from '../../shared/icon.component';
         } @else if (game.isReviewMode()) {
           <div class="message is-accent">
             <app-icon name="trophy" />
-            <span class="message-text">Solved in {{ formatTime(game.reviewCompletedTime()) }}. Next daily puzzle at midnight.</span>
+            <span class="message-text">
+              Solved in {{ duration(game.reviewCompletedTime() ?? 0) }}.
+              @if (game.puzzle()?.isDaily) {
+                Next puzzle in <span class="mono">{{ countdown() }}</span>.
+              }
+            </span>
           </div>
         } @else if (game.conflictDetail(); as conflict) {
           <div class="message is-danger is-shake">
@@ -128,7 +134,7 @@ import { IconComponent } from '../../shared/icon.component';
         } @else if (game.isSolved()) {
           <div class="message is-success">
             <app-icon name="check" />
-            <span class="message-text">Solved. Nice work.</span>
+            <span class="message-text">Solved in {{ duration(game.elapsedSeconds()) }}. Nice work.</span>
           </div>
         } @else if (game.queenCount() === size()) {
           <div class="message is-success">
@@ -330,6 +336,7 @@ import { IconComponent } from '../../shared/icon.component';
 
     .message app-icon { color: var(--muted); }
     .message-text { text-wrap: pretty; }
+    .message-text .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 600; }
     .message-title { font-weight: 650; }
 
     .message.is-hint { background: var(--accent-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent); color: var(--text); }
@@ -374,6 +381,17 @@ import { IconComponent } from '../../shared/icon.component';
 })
 export class BoardComponent {
   readonly game = inject(GameEngineService);
+
+  readonly duration = formatDuration;
+  private readonly now = signal(Date.now());
+  readonly countdown = computed(() => formatCountdown(msUntilNextMidnight(new Date(this.now()))));
+
+  constructor() {
+    const tick = setInterval(() => {
+      if (this.game.isReviewMode()) this.now.set(Date.now());
+    }, 1000);
+    inject(DestroyRef).onDestroy(() => clearInterval(tick));
+  }
 
   readonly size = computed(() => this.game.board().length || 8);
   readonly focusCells = computed(() => {
@@ -424,13 +442,6 @@ export class BoardComponent {
   private startR = -1;
   private startC = -1;
   private dragTargetMark: CellMark = 'x';
-
-  formatTime(seconds: number | null): string {
-    if (seconds === null || seconds === undefined || seconds <= 0) return '--';
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m}:${s < 10 ? '0' : ''}${s}`;
-  }
 
   onCellPointerDown(event: PointerEvent, r: number, c: number): void {
     if (event.button !== 0 || this.game.isReviewMode()) return;

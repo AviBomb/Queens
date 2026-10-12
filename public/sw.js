@@ -1,57 +1,58 @@
-const CACHE_NAME = 'queens-game-v4';
+const CACHE_NAME = 'queens-game-v6';
 
-self.addEventListener('install', (event) => {
+self.addEventListener('install', () => {
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(
-        keys.map((key) => {
-          if (key !== CACHE_NAME) {
-            return caches.delete(key);
-          }
-        })
-      )
-    ).then(() => self.clients.claim())
+    caches
+      .keys()
+      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))))
+      .then(() => self.clients.claim())
   );
 });
 
+function saveCopy(request, response) {
+  if (!response || response.status !== 200) return;
+  const copy = response.clone();
+  caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+}
+
 self.addEventListener('fetch', (event) => {
-  // Only handle GET requests
-  if (event.request.method !== 'GET') return;
+  const request = event.request;
+  // The in-app update check asks for no-store; let it reach the network untouched.
+  if (request.method !== 'GET' || request.cache === 'no-store') return;
 
-  event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      if (cachedResponse) {
-        // Return cached, and asynchronously update cache in background
-        fetch(event.request)
-          .then((networkResponse) => {
-            if (networkResponse && networkResponse.status === 200) {
-              const copy = networkResponse.clone();
-              caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-            }
-          })
-          .catch(() => {});
-        return cachedResponse;
-      }
-
-      return fetch(event.request)
-        .then((networkResponse) => {
-          if (!networkResponse || networkResponse.status !== 200) {
-            return networkResponse;
-          }
-          const copy = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-          return networkResponse;
+  // The page itself goes to the network first so a new deploy loads straight away.
+  // The cached copy is only the offline fallback.
+  if (request.mode === 'navigate') {
+    event.respondWith(
+      fetch(request.url, { cache: 'no-cache', credentials: 'same-origin' })
+        .then((response) => {
+          saveCopy(request, response);
+          return response;
         })
-        .catch(() => {
-          // If offline and request is for navigation, return cached root
-          if (event.request.mode === 'navigate') {
-            return caches.match('./') || caches.match('index.html');
-          }
-        });
+        .catch(() =>
+          caches
+            .match(request)
+            .then((cached) => cached || caches.match('./'))
+            .then((cached) => cached || caches.match('index.html'))
+        )
+    );
+    return;
+  }
+
+  // Scripts, styles and images have hashed or stable names: serve the cached copy, refresh it in the background.
+  event.respondWith(
+    caches.match(request).then((cached) => {
+      const network = fetch(request)
+        .then((response) => {
+          saveCopy(request, response);
+          return response;
+        })
+        .catch(() => cached);
+      return cached || network;
     })
   );
 });

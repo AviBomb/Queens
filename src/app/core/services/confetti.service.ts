@@ -22,6 +22,55 @@ export class ConfettiService {
   private particles: Particle[] = [];
   private animationFrameId: number | null = null;
 
+  /** Gold burst from the centre of the screen for a new best time. */
+  launchRecord(): void {
+    if (typeof window === 'undefined' || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    if (!this.ensureCanvas()) return;
+    const width = this.canvas!.width;
+    const height = this.canvas!.height;
+    const gold = ['#f59e0b', '#fbbf24', '#fde047', '#fffbeb', '#d97706', '#fcd34d'];
+
+    this.particles = [];
+    for (let i = 0; i < 180; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = Math.random() * 13 + 6;
+      this.particles.push({
+        x: width / 2,
+        y: height * 0.42,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - 6,
+        size: Math.random() * 9 + 7,
+        color: gold[Math.floor(Math.random() * gold.length)],
+        rotation: Math.random() * 360,
+        vRot: (Math.random() - 0.5) * 12,
+        shape: i % 3 === 0 ? 'star' : Math.random() > 0.5 ? 'rect' : 'circle',
+        alpha: 1
+      });
+    }
+
+    if (this.animationFrameId) cancelAnimationFrame(this.animationFrameId);
+    this.animate();
+  }
+
+  private ensureCanvas(): boolean {
+    if (typeof document === 'undefined') return false;
+    if (!this.canvas) {
+      this.canvas = document.createElement('canvas');
+      this.canvas.style.position = 'fixed';
+      this.canvas.style.top = '0';
+      this.canvas.style.left = '0';
+      this.canvas.style.width = '100vw';
+      this.canvas.style.height = '100vh';
+      this.canvas.style.pointerEvents = 'none';
+      this.canvas.style.zIndex = '9999';
+      document.body.appendChild(this.canvas);
+      this.ctx = this.canvas.getContext('2d');
+    }
+    this.canvas.width = window.innerWidth;
+    this.canvas.height = window.innerHeight;
+    return !!this.ctx;
+  }
+
   launch(): void {
     if (typeof document === 'undefined') return;
 
@@ -92,6 +141,8 @@ export class ConfettiService {
 
       if (p.shape === 'rect') {
         this.ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.6);
+      } else if (p.shape === 'star') {
+        this.drawStar(p.size / 2);
       } else {
         this.ctx.beginPath();
         this.ctx.arc(0, 0, p.size / 2, 0, Math.PI * 2);
@@ -107,6 +158,18 @@ export class ConfettiService {
       this.clear();
     }
   };
+
+  private drawStar(radius: number): void {
+    if (!this.ctx) return;
+    this.ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const r = i % 2 === 0 ? radius : radius * 0.45;
+      const a = (Math.PI / 5) * i - Math.PI / 2;
+      this.ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+    }
+    this.ctx.closePath();
+    this.ctx.fill();
+  }
 
   clear(): void {
     if (this.animationFrameId) {

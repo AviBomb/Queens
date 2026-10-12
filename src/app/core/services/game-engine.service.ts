@@ -13,7 +13,7 @@ import {
 } from '../models/queens.model';
 import { PuzzleGeneratorService } from './puzzle-generator.service';
 import { AudioHapticsService } from './audio-haptics.service';
-import { StorageService } from './storage.service';
+import { GameSlot, SavedGameState, StorageService } from './storage.service';
 import { LogicBoard, REGION_NAMES, cellName, explainDeadEnd, findDeduction } from '../logic/queens-logic';
 
 @Injectable({
@@ -41,6 +41,18 @@ export class GameEngineService {
   readonly reviewCompletedTime = signal<number | null>(null);
   readonly isDailyCompletedToday = signal<boolean>(false);
   readonly sizePreference = signal<BoardSizeOption>(this.storage.getSizePreference());
+
+  // Saved games waiting to be resumed, mirrored from storage
+  readonly savedDaily = signal<SavedGameState | null>(this.storage.loadGame('daily'));
+  readonly savedRandom = signal<SavedGameState | null>(this.storage.loadGame('random'));
+  readonly hasLastCompleted = signal<boolean>(!!this.storage.loadLastCompleted());
+
+  /** Bumped on every real win (not when a solved board is reopened for review). */
+  readonly winCount = signal(0);
+  /** Set when a win beats a previous best time. */
+  readonly newBestTime = signal<{ previous: number; current: number } | null>(null);
+  /** Seconds of active play since the last move or hint. */
+  readonly idleSeconds = signal(0);
 
   // Map from 'row,col' of a queen to the list of cells auto-filled with 'X' by that queen
   private queenAutoXMap = new Map<string, CellCoord[]>();
@@ -138,8 +150,30 @@ export class GameEngineService {
   readonly canUndo = computed(() => this.moveHistory().length > 0 && !this.isSolved() && !this.isReviewMode());
   readonly canRedo = computed(() => this.redoStack().length > 0 && !this.isSolved() && !this.isReviewMode());
 
+  readonly hasUnfinishedRandom = computed(() => !!this.savedRandom());
+  /** The open board is a random puzzle still being solved. */
+  readonly isCurrentUnfinishedRandom = computed(() => {
+    const p = this.puzzle();
+    return !!p && !p.isDaily && !this.isSolved() && !this.isReviewMode();
+  });
+  readonly hintNudge = computed(
+    () =>
+      this.idleSeconds() >= 10 &&
+      !this.activeHint() &&
+      this.hintCooldown() === 0 &&
+      !this.isSolved() &&
+      !this.isReviewMode()
+  );
+  /** Player-facing name that never reveals the seed. */
+  readonly puzzleLabel = computed(() => {
+    const p = this.puzzle();
+    if (!p) return 'Queens';
+    return p.isDaily ? 'Daily challenge' : `Random ${p.size}×${p.size}`;
+  });
+
   private timerInterval: ReturnType<typeof setInterval> | null = null;
   private cooldownInterval: ReturnType<typeof setInterval> | null = null;
+  private unsavedPlaySeconds = 0;
 
   constructor() {
     const savedAutoX = localStorage.getItem('queens_autox');
@@ -147,6 +181,97 @@ export class GameEngineService {
       this.autoX.set(savedAutoX === 'true');
     }
     this.isDailyCompletedToday.set(this.storage.isDailyCompletedToday());
+    this.storage.reconcileDailyStreak();
+  }
+
+  /** Opens today's daily: the solved board, the one in progress, or a fresh one. */
+  openDaily(): void {
+    const p = this.puzzle();
+    if (p?.isDaily && p.dateStr === this.storage.getLocalDateString()) {
+      if (!this.isSolved()) this.startTimer();
+      return;
+    }
+    this.suspendCurrent();
+    const saved = this.storage.isDailyCompletedToday() ? null : this.storage.loadGame('daily');
+    if (saved) {
+      this.loadSaved(saved);
+      this.startTimer();
+    } else {
+      this.startNewGame(undefined, true);
+    }
+  }
+
+  /** Resumes the unfinished random game, or deals a new one. */
+  openRandom(): void {
+    if (this.isCurrentUnfinishedRandom()) {
+      this.startTimer();
+      return;
+    }
+    this.suspendCurrent();
+    const saved = this.storage.loadGame('random');
+    if (saved) {
+      this.loadSaved(saved);
+      this.startTimer();
+    } else {
+      this.startNewGame();
+    }
+  }
+
+  /** Reopens the last solved random board, read-only. */
+  openLastCompleted(): void {
+    const last = this.storage.loadLastCompleted();
+    if (!last) return;
+    this.suspendCurrent();
+    this.loadSaved(last);
+    this.reviewCompletedTime.set(last.elapsedSeconds);
+    this.isReviewMode.set(true);
+    this.isSolved.set(true);
+  }
+
+  private suspendCurrent(): void {
+    this.saveProgress();
+    this.stopTimer();
+  }
+
+  private loadSaved(state: SavedGameState): void {
+    this.activeHint.set(null);
+    this.moveHistory.set([]);
+    this.redoStack.set([]);
+    this.queenAutoXMap.clear();
+    this.newBestTime.set(null);
+    this.idleSeconds.set(0);
+    this.isReviewMode.set(false);
+    this.reviewCompletedTime.set(null);
+    this.isSolved.set(false);
+
+    const solution =
+      state.solution && state.solution.length > 0
+        ? state.solution
+        : this.generator.generatePuzzle(state.seed, state.isDaily).solution;
+    this.puzzle.set({
+      id: state.puzzleId,
+      seed: state.seed,
+      size: state.regions.length,
+      regions: state.regions,
+      solution,
+      isDaily: state.isDaily,
+      dateStr: state.dateStr
+    });
+    this.board.set(
+      state.regions.map((row, r) =>
+        row.map((regionId, c) => ({
+          row: r,
+          col: c,
+          regionId,
+          mark: state.marks[r][c],
+          isConflict: false,
+          isConflictAdjacent: false,
+          isHint: false,
+          isLastPlaced: false
+        }))
+      )
+    );
+    this.elapsedSeconds.set(state.elapsedSeconds);
   }
 
   /**
@@ -154,11 +279,13 @@ export class GameEngineService {
    * For daily challenges, if already completed today, opens the completed board in Review Mode!
    */
   startNewGame(seed?: number, isDaily = false): void {
-    this.stopTimer();
+    this.suspendCurrent();
     this.activeHint.set(null);
     this.moveHistory.set([]);
     this.redoStack.set([]);
     this.queenAutoXMap.clear();
+    this.newBestTime.set(null);
+    this.idleSeconds.set(0);
 
     // Check if daily challenge has already been completed today
     if (isDaily) {
@@ -250,19 +377,18 @@ export class GameEngineService {
   }
 
   /**
-   * Restarts the current puzzle from the beginning.
+   * Clears the marks on the current puzzle. The timer keeps running from where it was.
    */
   restartCurrentGame(): void {
     if (this.isSolved() || this.isReviewMode()) return;
     const p = this.puzzle();
     if (!p) return;
-    this.stopTimer();
     this.activeHint.set(null);
     this.moveHistory.set([]);
     this.redoStack.set([]);
     this.queenAutoXMap.clear();
     this.isSolved.set(false);
-    this.elapsedSeconds.set(0);
+    this.idleSeconds.set(0);
 
     const size = p.size;
     const cleanBoard: Cell[][] = Array.from({ length: size }, (_, r) =>
@@ -279,7 +405,6 @@ export class GameEngineService {
     );
 
     this.board.set(cleanBoard);
-    this.startTimer();
     this.saveProgress();
   }
 
@@ -336,6 +461,7 @@ export class GameEngineService {
     const curBoard = this.board();
     const prevMark = curBoard[row][col].mark;
     if (prevMark === mark) return;
+    this.idleSeconds.set(0);
 
     let autoXCells: CellCoord[] = [];
 
@@ -442,6 +568,7 @@ export class GameEngineService {
   undo(): void {
     const history = this.moveHistory();
     if (history.length === 0 || this.isSolved() || this.isReviewMode()) return;
+    this.idleSeconds.set(0);
 
     let lastMove = history[history.length - 1];
     let remaining = history.slice(0, -1);
@@ -499,6 +626,7 @@ export class GameEngineService {
   redo(): void {
     const redos = this.redoStack();
     if (redos.length === 0 || this.isSolved() || this.isReviewMode()) return;
+    this.idleSeconds.set(0);
 
     const nextMove = redos[redos.length - 1];
     this.redoStack.set(redos.slice(0, -1));
@@ -648,12 +776,22 @@ export class GameEngineService {
     if (this.isSolved() || this.isReviewMode()) return;
     this.isSolved.set(true);
     this.stopTimer();
+    this.flushPlayTime();
 
     const p = this.puzzle();
     if (p) {
       const elapsed = this.elapsedSeconds();
       const isDaily = !!p.isDaily;
       const dateStr = p.dateStr || this.storage.getLocalDateString();
+      const marks = this.board().map((row) => row.map((c) => c.mark));
+
+      const before = this.storage.getStats();
+      const previousBest = isDaily ? before.dailyStats.bestTime : before.bestTime;
+      this.newBestTime.set(
+        previousBest !== null && elapsed > 0 && elapsed < previousBest
+          ? { previous: previousBest, current: elapsed }
+          : null
+      );
 
       let dailyRecord: CompletedDailyRecord | undefined;
       if (isDaily) {
@@ -662,19 +800,32 @@ export class GameEngineService {
           puzzleId: p.id,
           seed: p.seed,
           regions: p.regions,
-          marks: this.board().map((row) => row.map((c) => c.mark)),
+          marks,
           elapsedSeconds: elapsed,
           solution: p.solution,
           completedAt: new Date().toISOString()
         };
         this.isDailyCompletedToday.set(true);
         this.reviewCompletedTime.set(elapsed);
+      } else {
+        this.storage.saveLastCompleted({
+          puzzleId: p.id,
+          seed: p.seed,
+          isDaily: false,
+          dateStr,
+          regions: p.regions,
+          marks,
+          elapsedSeconds: elapsed,
+          solution: p.solution
+        });
+        this.hasLastCompleted.set(true);
       }
 
       this.storage.recordWin(elapsed, isDaily, dateStr, dailyRecord);
-      this.storage.saveCurrentGame(null);
+      this.writeSlot(isDaily ? 'daily' : 'random', null);
     }
 
+    this.winCount.update((n) => n + 1);
     this.audio.playVictory();
   }
 
@@ -785,6 +936,7 @@ export class GameEngineService {
 
   private setHint(hint: HintResult): void {
     this.activeHint.set(hint);
+    this.idleSeconds.set(0);
     this.audio.playMarkX();
 
     // Start 10-second cooldown timer
@@ -818,7 +970,19 @@ export class GameEngineService {
     this.isTimerRunning.set(true);
     this.timerInterval = setInterval(() => {
       this.elapsedSeconds.update((s) => s + 1);
+      this.idleSeconds.update((s) => s + 1);
+      this.unsavedPlaySeconds++;
     }, 1000);
+  }
+
+  private flushPlayTime(): void {
+    this.storage.addPlayTime(this.unsavedPlaySeconds);
+    this.unsavedPlaySeconds = 0;
+  }
+
+  private writeSlot(slot: GameSlot, state: SavedGameState | null): void {
+    this.storage.saveGame(slot, state);
+    (slot === 'daily' ? this.savedDaily : this.savedRandom).set(state);
   }
 
   private stopTimer(): void {
@@ -832,7 +996,8 @@ export class GameEngineService {
   private saveProgress(): void {
     const p = this.puzzle();
     if (!p || this.isSolved()) return;
-    this.storage.saveCurrentGame({
+    this.flushPlayTime();
+    this.writeSlot(p.isDaily ? 'daily' : 'random', {
       puzzleId: p.id,
       seed: p.seed,
       isDaily: !!p.isDaily,

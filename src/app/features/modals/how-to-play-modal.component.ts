@@ -1,14 +1,14 @@
 import { Component, output } from '@angular/core';
 import { IconComponent } from '../../shared/icon.component';
+import { SheetComponent } from '../../shared/sheet.component';
 
 @Component({
   selector: 'app-how-to-play-modal',
   standalone: true,
-  imports: [IconComponent],
+  imports: [IconComponent, SheetComponent],
   template: `
-    <div class="sheet-backdrop" (click)="close.emit()">
-      <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="rules-title" (click)="$event.stopPropagation()">
-        <div class="sheet-grabber" aria-hidden="true"></div>
+    <app-sheet labelledBy="rules-title" (closed)="close.emit()">
+      <div class="sheet-body">
         <div class="sheet-head">
           <h2 id="rules-title" class="sheet-title">How to play</h2>
           <button type="button" class="sheet-close" (click)="close.emit()" aria-label="Close rules">
@@ -51,9 +51,9 @@ import { IconComponent } from '../../shared/icon.component';
           </ul>
         </div>
 
-        <button type="button" class="btn btn-primary btn-block" (click)="close.emit()">Start playing</button>
+        <button type="button" class="btn btn-primary btn-block" (click)="close.emit()">Got it</button>
       </div>
-    </div>
+    </app-sheet>
   `,
   styles: [`
     .lead { font-size: 15px; color: var(--text-2); max-width: 46ch; }

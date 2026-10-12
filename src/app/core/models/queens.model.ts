@@ -54,7 +54,19 @@ export interface DailyChallengeStats {
   totalTime: number; // in seconds
   averageTime: number | null; // in seconds
   lastCompletedDate: string; // 'YYYY-MM-DD'
+  /** Last day that counted toward the streak, either solved or covered by a freeze. */
+  lastStreakDate: string;
+  /** Streak freezes held, 0 to MAX_STREAK_FREEZES. */
+  freezes: number;
+  /** Days a freeze kept the streak alive. */
+  frozenDates: string[];
 }
+
+export const MAX_STREAK_FREEZES = 2;
+/** Daily solves needed to earn one streak freeze. */
+export const DAILIES_PER_FREEZE = 5;
+/** Total play time that unlocks custom seeds. */
+export const SEED_UNLOCK_SECONDS = 3600;
 
 export interface CompletedDailyRecord {
   dateStr: string; // 'YYYY-MM-DD'
@@ -77,6 +89,8 @@ export interface GameStats {
   averageTime: number | null; // in seconds
   recentTimes: number[];
   lastPlayedDate: string;
+  /** Seconds spent on unsolved and solved boards, across all games. */
+  totalPlaySeconds: number;
   dailyStats: DailyChallengeStats;
 }
 

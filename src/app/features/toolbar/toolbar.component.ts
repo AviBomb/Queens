@@ -1,13 +1,14 @@
 import { Component, HostListener, computed, inject, signal } from '@angular/core';
-import { FormsModule } from '@angular/forms';
 import { GameEngineService } from '../../core/services/game-engine.service';
 import { BoardSizeOption } from '../../core/models/queens.model';
 import { IconComponent } from '../../shared/icon.component';
+import { SheetComponent } from '../../shared/sheet.component';
+import { SizeSheetComponent, sizeLabel } from '../size-sheet/size-sheet.component';
 
 @Component({
   selector: 'app-toolbar',
   standalone: true,
-  imports: [FormsModule, IconComponent],
+  imports: [IconComponent, SheetComponent, SizeSheetComponent],
   template: `
     <div class="dock">
       <div class="tools" role="toolbar" aria-label="Game controls">
@@ -50,6 +51,7 @@ import { IconComponent } from '../../shared/icon.component';
         <button
           type="button"
           class="tool tool-hint"
+          [class.is-nudge]="game.hintNudge()"
           [disabled]="game.isSolved() || game.hintCooldown() > 0"
           (click)="game.requestHint()"
           [title]="hintTitle()"
@@ -82,113 +84,68 @@ import { IconComponent } from '../../shared/icon.component';
       </div>
 
       <div class="modes">
-        @if (showSeedInput()) {
-          <label class="sr-only" for="seed-input">Puzzle seed</label>
-          <input
-            id="seed-input"
-            type="number"
-            inputmode="numeric"
-            class="seed-input"
-            placeholder="Seed, e.g. 1042"
-            [(ngModel)]="customSeed"
-            (keydown.enter)="playCustomSeed()"
-          />
-          <button type="button" class="btn btn-primary seed-go" (click)="playCustomSeed()">
-            Play
-            <app-icon name="arrowRight" />
-          </button>
-          <button type="button" class="square-btn" (click)="showSeedInput.set(false)" aria-label="Cancel custom seed" title="Cancel">
-            <app-icon name="close" />
-          </button>
-        } @else {
+        <button
+          type="button"
+          class="btn mode-daily"
+          [class.is-active]="isDailySelected()"
+          [class.is-done]="game.isDailyCompletedToday()"
+          (click)="onDailyClick()"
+          [title]="dailyButtonTitle()"
+        >
+          <app-icon [name]="game.isDailyCompletedToday() ? 'check' : 'calendar'" />
+          {{ game.isDailyCompletedToday() ? 'Daily solved' : 'Daily' }}
+        </button>
+
+        <div class="split" [class.is-locked]="randomLocked()" role="group" aria-label="Random game">
           <button
             type="button"
-            class="btn mode-daily"
-            [class.is-active]="isDailySelected()"
-            [class.is-done]="game.isDailyCompletedToday()"
-            (click)="playDaily()"
-            [title]="dailyButtonTitle()"
+            class="split-main"
+            [disabled]="randomLocked()"
+            (click)="playRandom()"
+            [title]="randomTitle()"
           >
-            <app-icon [name]="game.isDailyCompletedToday() ? 'check' : 'calendar'" />
-            {{ game.isDailyCompletedToday() ? 'Daily solved' : 'Daily' }}
+            <app-icon name="shuffle" />
+            {{ randomLabel() }}
           </button>
-
-          <div class="split" role="group" aria-label="Random game">
-            <button type="button" class="split-main" (click)="playRandom()" title="Start a new random puzzle">
-              <app-icon name="shuffle" />
-              Random
-            </button>
-            <button
-              type="button"
-              class="split-size"
-              (click)="showSizes.set(true)"
-              title="Choose board size"
-              [attr.aria-label]="'Board size: ' + sizeLabel() + '. Change size'"
-            >
-              {{ sizeLabel() }}
-              <app-icon name="chevronDown" />
-            </button>
-          </div>
-
-          <button type="button" class="square-btn seed-toggle" (click)="showSeedInput.set(true)" title="Play custom seed" aria-label="Play custom seed">
-            <app-icon name="hash" />
-            <span class="seed-toggle-label">Custom seed</span>
+          <button
+            type="button"
+            class="split-size"
+            [disabled]="randomLocked() || game.hasUnfinishedRandom()"
+            (click)="showSizes.set(true)"
+            title="Choose board size"
+            [attr.aria-label]="'Board size: ' + sizeName() + '. Change size'"
+          >
+            {{ sizeName() }}
+            <app-icon name="chevronDown" />
           </button>
-        }
+        </div>
       </div>
+
+      @if (randomLocked()) {
+        <p class="dock-note">Finish this puzzle to start a new one</p>
+      }
     </div>
 
     @if (showSizes()) {
-      <div class="sheet-backdrop" (click)="showSizes.set(false)">
-        <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="size-title" (click)="$event.stopPropagation()">
-          <div class="sheet-grabber" aria-hidden="true"></div>
-          <div class="sheet-head">
-            <h2 id="size-title" class="sheet-title">New random game</h2>
-            <button type="button" class="sheet-close" (click)="showSizes.set(false)" aria-label="Close">
-              <app-icon name="close" />
-            </button>
-          </div>
-          <div class="size-list" role="radiogroup" aria-labelledby="size-title">
-            @for (option of sizeOptions; track option.value) {
-              <button
-                type="button"
-                class="size-row"
-                role="radio"
-                [attr.aria-checked]="game.sizePreference() === option.value"
-                (click)="chooseSize(option.value)"
-              >
-                <span class="size-badge">{{ option.badge }}</span>
-                <span class="size-text">
-                  <span class="size-name">{{ option.name }}</span>
-                  <span class="size-desc">{{ option.desc }}</span>
-                </span>
-                @if (game.sizePreference() === option.value) {
-                  <app-icon class="size-check" name="check" />
-                }
-              </button>
-            }
-          </div>
-        </div>
-      </div>
+      <app-size-sheet (chosen)="chooseSize($event)" (closed)="showSizes.set(false)" />
     }
 
     @if (confirmRestart()) {
-      <div class="sheet-backdrop" (click)="confirmRestart.set(false)">
-        <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="restart-title" (click)="$event.stopPropagation()">
-          <div class="sheet-grabber" aria-hidden="true"></div>
+      <app-sheet labelledBy="restart-title" (closed)="confirmRestart.set(false)">
+        <div class="sheet-body">
           <div class="sheet-head">
             <h2 id="restart-title" class="sheet-title">Restart puzzle?</h2>
             <button type="button" class="sheet-close" (click)="confirmRestart.set(false)" aria-label="Cancel restart">
               <app-icon name="close" />
             </button>
           </div>
-          <p class="restart-copy">Restart this puzzle? Your marks and the timer will be cleared.</p>
+          <p class="restart-copy">Your marks will be cleared. The timer keeps running.</p>
           <div class="restart-actions">
             <button type="button" class="btn btn-tonal" (click)="confirmRestart.set(false)">Cancel</button>
             <button type="button" class="btn btn-primary" (click)="confirmRestartNow()">Restart</button>
           </div>
         </div>
-      </div>
+      </app-sheet>
     }
   `,
   styles: [`
@@ -227,10 +184,20 @@ import { IconComponent } from '../../shared/icon.component';
     .tool-hint:not(:disabled) app-icon { color: var(--accent-strong); }
     .tool.is-on { background: var(--accent-soft); color: var(--accent-strong); }
     .tool.is-on .tool-label { color: var(--text); }
+    .tool.is-on:disabled { background: none; color: var(--faint); }
+    .tool.is-on:disabled .tool-label { color: inherit; }
+
+    .tool-hint.is-nudge { background: var(--accent-soft); animation: nudge 1.6s var(--ease-out) infinite; }
+    .tool-hint.is-nudge .tool-label { color: var(--text); }
+
+    @keyframes nudge {
+      0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent); }
+      50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 0%, transparent); }
+    }
 
     .modes {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr) auto;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
       gap: 6px;
     }
 
@@ -240,21 +207,11 @@ import { IconComponent } from '../../shared/icon.component';
     .mode-daily.is-active { box-shadow: inset 0 0 0 1.5px var(--text); }
     .mode-daily.is-done { background: var(--success-soft); color: var(--success); box-shadow: none; }
 
-    .square-btn {
-      width: 52px;
-      height: 52px;
-      display: grid;
-      place-items: center;
-      border-radius: var(--r-lg);
-      background: var(--sunken);
-      color: var(--text-2);
-      transition: transform 160ms var(--ease-out), background-color 160ms var(--ease-out);
-    }
+    .dock-note { padding: 0 8px 2px; font-size: 12px; font-weight: 500; color: var(--muted); text-align: center; }
 
-    .square-btn:active { transform: scale(0.94); }
-    .seed-toggle-label { display: none; }
-
-    .split { display: flex; min-width: 0; min-height: 52px; border-radius: var(--r-lg); background: var(--ink); color: var(--on-ink); overflow: hidden; }
+    .split { display: flex; min-width: 0; min-height: 52px; border-radius: var(--r-lg); background: var(--ink); color: var(--on-ink); overflow: hidden; transition: background-color 160ms var(--ease-out), color 160ms var(--ease-out); }
+    .split.is-locked { background: var(--sunken); color: var(--faint); }
+    .split-main:disabled, .split-size:disabled { cursor: not-allowed; }
     .split-main, .split-size { display: flex; align-items: center; justify-content: center; transition: background-color 160ms var(--ease-out); }
     .split-main { flex: 1; min-width: 0; gap: 8px; font-size: 15px; font-weight: 600; --icon-size: 19px; }
     .split-size {
@@ -266,64 +223,20 @@ import { IconComponent } from '../../shared/icon.component';
       font-weight: 600;
       --icon-size: 15px;
     }
-    .split-main:active, .split-size:active { background: color-mix(in srgb, var(--on-ink) 14%, transparent); }
-
-    .size-list { display: flex; flex-direction: column; gap: 4px; }
-    .size-row { display: flex; align-items: center; gap: 14px; min-height: 64px; padding: 10px 14px; border-radius: var(--r-md); text-align: left; }
-    .size-row[aria-checked='true'] { background: var(--sunken); }
-    .size-row:active { background: var(--sunken); }
-    .size-badge {
-      width: 54px;
-      height: 40px;
-      flex-shrink: 0;
-      display: grid;
-      place-items: center;
-      border-radius: 10px;
-      background: var(--accent-soft);
-      color: var(--accent-strong);
-      font-family: var(--font-mono);
-      font-size: 14px;
-      font-weight: 600;
-    }
-    .size-text { flex: 1; display: flex; flex-direction: column; gap: 1px; }
-    .size-name { font-size: 15px; font-weight: 600; }
-    .size-desc { font-size: 13px; color: var(--muted); }
-    .size-check { color: var(--text); }
-
-    .seed-input {
-      min-width: 0;
-      height: 52px;
-      padding: 0 16px;
-      border-radius: var(--r-lg);
-      border: 1.5px solid var(--line-strong);
-      background: var(--surface);
-      font-family: var(--font-mono);
-      font-size: 16px;
-      font-weight: 500;
-      outline: none;
-      user-select: text;
-      -webkit-user-select: text;
-      animation: riseIn 200ms var(--ease-out);
-    }
-
-    .seed-input::placeholder { color: var(--muted); font-family: var(--font-sans); }
-    .seed-input:focus { border-color: var(--text); }
-    .seed-go { --icon-size: 17px; }
+    .split-main:active:not(:disabled), .split-size:active:not(:disabled) { background: color-mix(in srgb, var(--on-ink) 14%, transparent); }
 
     @media (hover: hover) {
-      .split-main:hover, .split-size:hover { background: color-mix(in srgb, var(--on-ink) 10%, transparent); }
-      .size-row:hover { background: var(--sunken); }
+      .split-main:hover:not(:disabled), .split-size:hover:not(:disabled) { background: color-mix(in srgb, var(--on-ink) 10%, transparent); }
       .tool:hover:not(:disabled) { background: var(--sunken); color: var(--text); }
-      .tool.is-on:hover { background: var(--accent-soft); }
-      .mode-daily:hover, .square-btn:hover { background: color-mix(in srgb, var(--sunken) 85%, var(--text)); }
+      .tool.is-on:hover:not(:disabled) { background: var(--accent-soft); }
+      .mode-daily:hover { background: color-mix(in srgb, var(--sunken) 85%, var(--text)); }
       .mode-daily.is-done:hover { background: var(--success-soft); }
     }
 
     @media (max-width: 767px) and (max-height: 700px) {
       .tool { min-height: 52px; gap: 3px; --icon-size: 20px; }
       .tool-label { font-size: 11px; }
-      .modes .btn, .square-btn, .seed-input, .split { min-height: 46px; height: 46px; }
-      .square-btn { width: 46px; }
+      .modes .btn, .split { min-height: 46px; height: 46px; }
     }
 
     /* Laptop rail */
@@ -333,23 +246,7 @@ import { IconComponent } from '../../shared/icon.component';
       .tool { min-height: 84px; border-radius: 18px; gap: 6px; }
       .tool-kbd { display: inline-block; font-size: 10px; }
       .tool-state { font-family: var(--font-mono); font-weight: 500; color: inherit; background: none; border: none; padding: 1px 0; }
-      .modes { grid-template-columns: 1fr 1fr; }
-      .modes .btn, .square-btn, .seed-input, .split { border-radius: 18px; }
-      .square-btn { width: auto; }
-      .seed-input { grid-column: span 2; }
-      .seed-toggle {
-        grid-column: span 2;
-        height: 44px;
-        display: flex;
-        justify-content: center;
-        gap: 8px;
-        background: none;
-        color: var(--muted);
-        font-size: 14px;
-        font-weight: 500;
-        --icon-size: 17px;
-      }
-      .seed-toggle-label { display: inline; }
+      .modes .btn, .split { border-radius: 18px; }
     }
 
     .restart-copy { font-size: 15px; line-height: 1.4; color: var(--text-2); }
@@ -359,22 +256,18 @@ import { IconComponent } from '../../shared/icon.component';
 export class ToolbarComponent {
   readonly game = inject(GameEngineService);
 
-  readonly showSeedInput = signal<boolean>(false);
   readonly showSizes = signal<boolean>(false);
   readonly confirmRestart = signal(false);
-  customSeed: number | null = null;
 
-  readonly sizeOptions: { value: BoardSizeOption; badge: string; name: string; desc: string }[] = [
-    { value: 'mix', badge: '7-10', name: 'Mix it up', desc: 'A different board size every game' },
-    { value: 7, badge: '7×7', name: 'Quick', desc: '7 colors, 7 queens' },
-    { value: 8, badge: '8×8', name: 'Classic', desc: '8 colors, 8 queens' },
-    { value: 9, badge: '9×9', name: 'Tricky', desc: '9 colors, 9 queens' },
-    { value: 10, badge: '10×10', name: 'Expert', desc: '10 colors, 10 queens' }
-  ];
+  readonly sizeName = computed(() => sizeLabel(this.game.sizePreference()));
 
-  readonly sizeLabel = computed(() => {
-    const option = this.game.sizePreference();
-    return option === 'mix' ? 'Mix' : `${option}×${option}`;
+  /** A random puzzle in progress has to be solved before a new one can be dealt. */
+  readonly randomLocked = computed(() => this.game.isCurrentUnfinishedRandom());
+  readonly canResumeRandom = computed(() => !this.randomLocked() && this.game.hasUnfinishedRandom());
+  readonly randomLabel = computed(() => (this.canResumeRandom() ? 'Resume' : 'Random'));
+  readonly randomTitle = computed(() => {
+    if (this.randomLocked()) return 'Finish this puzzle to start a new one';
+    return this.canResumeRandom() ? 'Back to your random puzzle' : 'Start a new random puzzle';
   });
 
   chooseSize(option: BoardSizeOption): void {
@@ -393,27 +286,33 @@ export class ToolbarComponent {
     return !!this.game.puzzle()?.isDaily;
   }
 
+  private isViewingSolvedDaily(): boolean {
+    return !!this.game.puzzle()?.isDaily && this.game.isReviewMode();
+  }
+
   dailyButtonTitle(): string {
+    if (this.isViewingSolvedDaily()) return 'Back to your last game';
     return this.game.isDailyCompletedToday()
       ? 'Daily challenge completed for today. Click to view the solved board.'
       : "Play today's daily challenge";
   }
 
-  playDaily(): void {
-    this.showSeedInput.set(false);
-    this.game.startNewGame(undefined, true);
+  /** On the solved daily board this returns to your other game; anywhere else it opens the daily. */
+  onDailyClick(): void {
+    if (!this.isViewingSolvedDaily()) {
+      this.game.openDaily();
+    } else if (this.game.hasUnfinishedRandom()) {
+      this.game.openRandom();
+    } else if (this.game.hasLastCompleted()) {
+      this.game.openLastCompleted();
+    } else {
+      this.game.startNewGame();
+    }
   }
 
   playRandom(): void {
-    this.showSeedInput.set(false);
-    this.game.startNewGame();
-  }
-
-  playCustomSeed(): void {
-    if (this.customSeed !== null && !Number.isNaN(this.customSeed)) {
-      this.game.startNewGame(Number(this.customSeed), false);
-      this.showSeedInput.set(false);
-    }
+    if (this.randomLocked()) return;
+    this.game.openRandom();
   }
 
   askRestart(): void {
@@ -431,10 +330,7 @@ export class ToolbarComponent {
     if (event.target instanceof HTMLInputElement) return;
 
     if (this.confirmRestart()) {
-      if (event.key === 'Escape') {
-        this.confirmRestart.set(false);
-        event.preventDefault();
-      } else if (event.key === 'Enter') {
+      if (event.key === 'Enter') {
         this.confirmRestartNow();
         event.preventDefault();
       }

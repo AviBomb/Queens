@@ -364,6 +364,81 @@ describe('GameEngineService', () => {
     expect(engine.activeHint()).toBeNull();
   });
 
+  it('keeps the daily and random games in separate slots with their own time', () => {
+    localStorage.clear();
+    engine.startNewGame(42);
+    engine.cycleCell(0, 0);
+    engine.elapsedSeconds.set(12);
+
+    engine.openDaily();
+    expect(engine.puzzle()!.isDaily).toBe(true);
+    engine.cycleCell(1, 1);
+    engine.elapsedSeconds.set(30);
+
+    engine.openRandom();
+    expect(engine.puzzle()!.isDaily).toBe(false);
+    expect(engine.board()[0][0].mark).toBe('x');
+    expect(engine.elapsedSeconds()).toBe(12);
+
+    engine.openDaily();
+    expect(engine.board()[1][1].mark).toBe('x');
+    expect(engine.elapsedSeconds()).toBe(30);
+  });
+
+  it('restart clears the marks but keeps the time', () => {
+    engine.elapsedSeconds.set(40);
+    engine.cycleCell(0, 0);
+    engine.restartCurrentGame();
+    expect(engine.board()[0][0].mark).toBe('empty');
+    expect(engine.elapsedSeconds()).toBe(40);
+  });
+
+  it('locks new random games until the current one is solved', () => {
+    expect(engine.isCurrentUnfinishedRandom()).toBe(true);
+    expect(engine.hasUnfinishedRandom()).toBe(true);
+
+    engine.puzzle()!.solution.forEach((c) => engine.setCellMark(c.row, c.col, 'queen'));
+    expect(engine.isCurrentUnfinishedRandom()).toBe(false);
+    expect(engine.hasUnfinishedRandom()).toBe(false);
+    expect(engine.hasLastCompleted()).toBe(true);
+  });
+
+  it('nudges toward a hint after 10 idle seconds and resets on a move', () => {
+    engine.setTimerPaused(true);
+    vi.useFakeTimers();
+    try {
+      engine.setTimerPaused(false);
+      vi.advanceTimersByTime(9000);
+      expect(engine.hintNudge()).toBe(false);
+      vi.advanceTimersByTime(1000);
+      expect(engine.hintNudge()).toBe(true);
+
+      engine.cycleCell(0, 0);
+      expect(engine.hintNudge()).toBe(false);
+      engine.setTimerPaused(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('flags a new best time only when an earlier best is beaten', () => {
+    localStorage.clear();
+    const solveIn = (seed: number, seconds: number) => {
+      engine.startNewGame(seed);
+      engine.elapsedSeconds.set(seconds);
+      engine.puzzle()!.solution.forEach((c) => engine.setCellMark(c.row, c.col, 'queen'));
+    };
+
+    solveIn(42, 50);
+    expect(engine.newBestTime()).toBeNull();
+
+    solveIn(43, 100);
+    expect(engine.newBestTime()).toBeNull();
+
+    solveIn(44, 30);
+    expect(engine.newBestTime()).toEqual({ previous: 50, current: 30 });
+  });
+
   it('pauses the timer while away and resumes on return', () => {
     engine.setTimerPaused(true);
     vi.useFakeTimers();

@@ -2,7 +2,7 @@
 
 - Keep a "cross these cells" hint highlighted until every hinted cell is crossed; already-crossed cells drop their highlight, and the rest stay visible.
 - Pause the solve timer when the tab is hidden or the window loses focus, and resume it when the player is back on the page.
-- Ask for confirmation before restarting a puzzle. Restart clears marks and the timer.
+- Ask for confirmation before restarting a puzzle. Restart clears marks; the timer keeps running.
 - Undoing a queen returns that cell to empty in one step, not back to an X.
 - The next hint is available after 10 seconds, not 15.
 - Use the custom crown-on-region-grid icon for the tab, home screen, and install icon. Do not ship the Angular favicon.
@@ -11,6 +11,6 @@
 ## Learned Workspace Facts
 
 - This repo is an Angular Queens puzzle, shipped as a PWA to GitHub Pages.
-- `public/sw.js` serves the cached app first. Bump `CACHE_NAME` when a deploy must replace cached scripts on phones.
+- `public/sw.js` loads the page network-first (cache only when offline) and serves hashed assets from cache. `UpdateService` compares the live `index.html` bundle name with the running one on launch and on return to the foreground, then reloads. Bump `CACHE_NAME` only when `sw.js` logic itself changes.
 - Region borders are one SVG overlay on the board (square line caps, 3px stroke), not per-cell thick CSS borders, so corners join in both themes on phone and desktop widths.
 - Audio and haptics are synthesized in the browser. Mobile Safari and Chrome leave `AudioContext` suspended unless it is created and resumed inside the user's tap. iOS browsers do not implement `navigator.vibrate`.

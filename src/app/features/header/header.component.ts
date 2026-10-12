@@ -2,24 +2,33 @@ import { Component, computed, inject, output, signal } from '@angular/core';
 import { GameEngineService } from '../../core/services/game-engine.service';
 import { AudioHapticsService } from '../../core/services/audio-haptics.service';
 import { StorageService } from '../../core/services/storage.service';
+import { UiService } from '../../core/services/ui.service';
 import { IconComponent } from '../../shared/icon.component';
+import { SheetComponent } from '../../shared/sheet.component';
 
 @Component({
   selector: 'app-header',
   standalone: true,
-  imports: [IconComponent],
+  imports: [IconComponent, SheetComponent],
   template: `
-    <header class="topbar">
+    <header class="topbar" [class.is-home]="isHome()">
       <div class="brand">
-        <span class="brand-mark"><app-icon name="crown" /></span>
+        @if (isHome()) {
+          <span class="brand-mark"><app-icon name="crown" /></span>
+        } @else {
+          <button type="button" class="icon-btn back-btn" (click)="ui.goHome()" aria-label="Back to home" title="Home">
+            <app-icon name="chevronLeft" />
+          </button>
+        }
         <div class="brand-text">
           <h1 class="game-title">Queens</h1>
-          <span class="puzzle-tag" [class.is-daily]="isDaily()">
-            {{ isDaily() ? 'Daily challenge' : size() + '×' + size() + ' · ' + puzzleId() }}
+          <span class="puzzle-tag" [class.is-daily]="!isHome() && isDaily()">
+            {{ isHome() ? todayLabel : game.puzzleLabel() }}
           </span>
         </div>
       </div>
 
+      @if (!isHome()) {
       <div class="hud">
         <button
           type="button"
@@ -52,18 +61,19 @@ import { IconComponent } from '../../shared/icon.component';
           <span class="hud-count">{{ game.queenCount() }}<span class="hud-total">/{{ size() }}</span></span>
         </div>
       </div>
+      }
 
       <nav class="actions" aria-label="Game menu">
         <button
           type="button"
           class="streak-chip"
-          [class.is-daily]="isDaily()"
+          [class.is-daily]="showDailyStreak()"
           (click)="openStats.emit()"
-          [title]="isDaily() ? 'Daily streak: ' + dailyStreak() + ' days' : 'Total streak: ' + totalStreak() + ' games'"
-          [attr.aria-label]="(isDaily() ? 'Daily streak ' + dailyStreak() : 'Streak ' + totalStreak()) + '. View statistics'"
+          [title]="showDailyStreak() ? 'Daily streak: ' + dailyStreak() + ' days' : 'Total streak: ' + totalStreak() + ' games'"
+          [attr.aria-label]="(showDailyStreak() ? 'Daily streak ' + dailyStreak() : 'Streak ' + totalStreak()) + '. View statistics'"
         >
-          <app-icon [name]="isDaily() ? 'calendar' : 'flame'" />
-          <span class="streak-num">{{ isDaily() ? dailyStreak() : totalStreak() }}</span>
+          <app-icon [name]="showDailyStreak() ? 'calendar' : 'flame'" />
+          <span class="streak-num">{{ showDailyStreak() ? dailyStreak() : totalStreak() }}</span>
         </button>
 
         <button
@@ -119,9 +129,8 @@ import { IconComponent } from '../../shared/icon.component';
     </header>
 
     @if (showMobileOptions()) {
-      <div class="sheet-backdrop" (click)="showMobileOptions.set(false)">
-        <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="settings-title" (click)="$event.stopPropagation()">
-          <div class="sheet-grabber" aria-hidden="true"></div>
+      <app-sheet labelledBy="settings-title" (closed)="showMobileOptions.set(false)">
+        <div class="sheet-body">
           <div class="sheet-head">
             <h2 id="settings-title" class="sheet-title">Settings</h2>
             <button type="button" class="sheet-close" (click)="showMobileOptions.set(false)" aria-label="Close settings">
@@ -207,7 +216,7 @@ import { IconComponent } from '../../shared/icon.component';
 
           <button type="button" class="btn btn-primary btn-block" (click)="showMobileOptions.set(false)">Done</button>
         </div>
-      </div>
+      </app-sheet>
     }
   `,
   styles: [`
@@ -224,7 +233,11 @@ import { IconComponent } from '../../shared/icon.component';
       padding: 10px 16px 10px;
     }
 
+    .topbar.is-home { grid-template-areas: "brand actions"; padding-top: 14px; padding-bottom: 14px; }
+
     .brand { grid-area: brand; display: flex; align-items: center; gap: 10px; min-width: 0; }
+
+    .back-btn { width: 38px; height: 38px; flex-shrink: 0; --icon-size: 20px; }
 
     .brand-mark {
       width: 38px;
@@ -368,6 +381,8 @@ import { IconComponent } from '../../shared/icon.component';
         padding: 16px 24px;
       }
 
+      .topbar.is-home { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "brand actions"; }
+
       .actions { justify-self: end; }
     }
 
@@ -468,6 +483,7 @@ import { IconComponent } from '../../shared/icon.component';
 export class HeaderComponent {
   readonly game = inject(GameEngineService);
   readonly audio = inject(AudioHapticsService);
+  readonly ui = inject(UiService);
   private readonly storage = inject(StorageService);
 
   readonly openHowToPlay = output<void>();
@@ -479,8 +495,10 @@ export class HeaderComponent {
   readonly size = computed(() => this.game.board().length || 8);
   readonly pips = computed(() => Array.from({ length: this.size() }, (_, i) => i));
 
-  readonly puzzleId = computed(() => this.game.puzzle()?.id ?? 'Queens');
+  readonly todayLabel = new Date().toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  readonly isHome = computed(() => this.ui.screen() === 'home');
   readonly isDaily = computed(() => !!this.game.puzzle()?.isDaily);
+  readonly showDailyStreak = computed(() => this.isHome() || this.isDaily());
   readonly isComplete = computed(() => this.game.queenCount() === this.size() && !this.game.hasConflicts());
   readonly totalStreak = computed(() => this.storage.getStats().currentStreak);
   readonly dailyStreak = computed(() => this.storage.getStats().dailyStats?.currentStreak ?? 0);

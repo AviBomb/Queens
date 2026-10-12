@@ -2,15 +2,16 @@ import { Component, computed, inject, output, signal } from '@angular/core';
 import { StorageService } from '../../core/services/storage.service';
 import { GameEngineService } from '../../core/services/game-engine.service';
 import { IconComponent } from '../../shared/icon.component';
+import { SheetComponent } from '../../shared/sheet.component';
+import { StreakCalendarComponent } from '../streak-calendar/streak-calendar.component';
 
 @Component({
   selector: 'app-stats-modal',
   standalone: true,
-  imports: [IconComponent],
+  imports: [IconComponent, SheetComponent, StreakCalendarComponent],
   template: `
-    <div class="sheet-backdrop" (click)="close.emit()">
-      <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="stats-title" (click)="$event.stopPropagation()">
-        <div class="sheet-grabber" aria-hidden="true"></div>
+    <app-sheet labelledBy="stats-title" (closed)="close.emit()">
+      <div class="sheet-body">
         <div class="sheet-head">
           <div>
             <h2 id="stats-title" class="sheet-title">Statistics</h2>
@@ -38,6 +39,7 @@ import { IconComponent } from '../../shared/icon.component';
             <div class="stat-tile"><dt>Best streak</dt><dd>{{ stats().dailyStats.maxStreak }}</dd></div>
             <div class="stat-tile"><dt>Best time</dt><dd class="is-accent">{{ formatTime(stats().dailyStats.bestTime) }}</dd></div>
           </dl>
+          <app-streak-calendar [showSummary]="false" />
         </section>
 
         <section class="section" aria-labelledby="all-heading">
@@ -82,9 +84,9 @@ import { IconComponent } from '../../shared/icon.component';
           </button>
         }
 
-        <button type="button" class="btn btn-primary btn-block" (click)="close.emit()">Back to game</button>
+        <button type="button" class="btn btn-primary btn-block" (click)="close.emit()">Done</button>
       </div>
-    </div>
+    </app-sheet>
   `,
   styles: [`
     .sub { font-size: 13px; color: var(--muted); margin-top: 2px; }

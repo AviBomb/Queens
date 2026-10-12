@@ -1,13 +1,19 @@
 <div class="app-shell">
   <app-header
-    (openHowToPlay)="showHowToPlay.set(true)"
-    (openStats)="showStats.set(true)"
+    (openHowToPlay)="ui.showHowToPlay.set(true)"
+    (openStats)="ui.showStats.set(true)"
   />
 
-  <main class="game-layout">
-    <app-board />
-    <app-toolbar />
-  </main>
+  @if (ui.screen() === 'home') {
+    <main class="home-layout">
+      <app-home />
+    </main>
+  } @else {
+    <main class="game-layout">
+      <app-board />
+      <app-toolbar />
+    </main>
+  }
 
   <footer class="app-footer">
     <p class="footer-note">
@@ -15,20 +21,47 @@
       Works offline. New daily puzzle at midnight.
     </p>
     <nav class="footer-links" aria-label="Help and statistics">
-      <button type="button" class="footer-link" (click)="showHowToPlay.set(true)">How to play</button>
-      <button type="button" class="footer-link" (click)="showStats.set(true)">Statistics</button>
+      <button type="button" class="footer-link" (click)="ui.showHowToPlay.set(true)">How to play</button>
+      <button type="button" class="footer-link" (click)="ui.showStats.set(true)">Statistics</button>
     </nav>
   </footer>
 
-  @if (game.isSolved() && showVictory()) {
+  @if (ui.toast(); as toast) {
+    <div class="toast" role="status" aria-live="polite">
+      <span class="toast-text">{{ toast.message }}</span>
+      @if (toast.action) {
+        <button type="button" class="toast-action" (click)="runToastAction(toast)">{{ toast.action.label }}</button>
+      }
+    </div>
+  }
+
+  @if (game.isSolved() && showVictory() && ui.screen() === 'game') {
     <app-victory-modal (close)="showVictory.set(false)" />
   }
 
-  @if (showHowToPlay()) {
-    <app-how-to-play-modal (close)="showHowToPlay.set(false)" />
+  @if (ui.showHowToPlay()) {
+    <app-how-to-play-modal (close)="ui.showHowToPlay.set(false)" />
   }
 
-  @if (showStats()) {
-    <app-stats-modal (close)="showStats.set(false)" />
+  @if (ui.showStats()) {
+    <app-stats-modal (close)="ui.showStats.set(false)" />
+  }
+
+  @if (ui.showCalendar()) {
+    <app-sheet labelledBy="calendar-title" (closed)="ui.showCalendar.set(false)">
+      <div class="sheet-body">
+        <div class="sheet-head">
+          <h2 id="calendar-title" class="sheet-title">Daily streak</h2>
+          <button type="button" class="sheet-close" (click)="ui.showCalendar.set(false)" aria-label="Close streak calendar">
+            <app-icon name="close" />
+          </button>
+        </div>
+        <app-streak-calendar />
+      </div>
+    </app-sheet>
+  }
+
+  @if (ui.showDemo()) {
+    <app-demo (closed)="ui.showDemo.set(false)" (playDaily)="playDailyFromDemo()" />
   }
 </div>
